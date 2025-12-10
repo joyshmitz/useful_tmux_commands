@@ -418,8 +418,8 @@ auto_setup_palette() {
     echo "✓ Palette config already exists"
   fi
 
-  # Add F6 binding to tmux.conf
-  local bind_line='bind-key -n F6 display-popup -E -w 90% -h 90% "source ~/.zshrc 2>/dev/null; ntm-palette-interactive"'
+  # Add F6 binding to tmux.conf (use zsh -ic for interactive mode so .zshrc loads fully)
+  local bind_line='bind-key -n F6 display-popup -E -w 90% -h 90% "zsh -ic ntm-palette-interactive"'
   if grep -q "bind-key -n F6" "$TMUX_CONF" 2>/dev/null; then
     echo "✓ F6 keybinding already configured"
   else
@@ -503,14 +503,19 @@ main() {
   local created_zshrc=false
 
   if [[ ! -f "$ZSHRC" ]]; then
-    # Offer Oh My Zsh + Powerlevel10k if interactive
-    if ! install_oh_my_zsh; then
-      # Either user declined or install failed; ensure we still have a zshrc
-      if [[ ! -f "$ZSHRC" ]]; then
-        echo "Creating minimal ~/.zshrc"
-        echo "# ~/.zshrc created by add_useful_tmux_commands_to_zshrc.sh" > "$ZSHRC"
-        created_zshrc=true
-      fi
+    # Offer Oh My Zsh + Powerlevel10k if interactive (don't fail if skipped or
+    # OMZ is already present without a zshrc)
+    install_oh_my_zsh || true
+
+    # After the (possible) install, ensure we definitely have a zshrc for the
+    # rest of this script to modify. This covers:
+    #   - user declined OMZ install
+    #   - OMZ was already installed but no ~/.zshrc exists
+    #   - OMZ install failed
+    if [[ ! -f "$ZSHRC" ]]; then
+      echo "Creating minimal ~/.zshrc"
+      echo "# ~/.zshrc created by add_useful_tmux_commands_to_zshrc.sh" > "$ZSHRC"
+      created_zshrc=true
     fi
   fi
 
@@ -554,6 +559,19 @@ export LC_ALL="${LC_ALL:-en_US.UTF-8}"
 # Default locations for logs and stored prompts
 _NTM_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ntm-logs"
 _NTM_PROMPT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ntm-prompts"
+
+# tmux.conf location and markers (for optional tweaks)
+_NTM_TMUX_CONF="${HOME}/.tmux.conf"
+_NTM_TMUX_MARKER_START="# === NTM-TMUX-TWEAKS-START ==="
+_NTM_TMUX_MARKER_END="# === NTM-TMUX-TWEAKS-END ==="
+
+# Generic backup helper for files
+_ntm_backup_file() {
+  local file="$1"
+  local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
+  cp "$file" "$backup"
+  echo "Created backup: $backup"
+}
 
 # ============================================================================
 # Agent Aliases
@@ -672,8 +690,8 @@ _ntm_check_tmux() {
 
 # Determine if the tmux.conf tweaks have already been added
 _ntm_tmux_conf_installed() {
-  grep -q "$TMUX_MARKER_START" "$TMUX_CONF" 2>/dev/null && \
-  grep -q "$TMUX_MARKER_END" "$TMUX_CONF" 2>/dev/null
+  grep -q "$_NTM_TMUX_MARKER_START" "$_NTM_TMUX_CONF" 2>/dev/null && \
+  grep -q "$_NTM_TMUX_MARKER_END" "$_NTM_TMUX_CONF" 2>/dev/null
 }
 
 # Offer to add helpful tmux.conf defaults (idempotent and optional)
@@ -684,9 +702,9 @@ _ntm_offer_tmux_conf_tweaks() {
   fi
 
   # Ensure tmux.conf exists
-  if [[ ! -f "$TMUX_CONF" ]]; then
-    echo "Creating $TMUX_CONF"
-    touch "$TMUX_CONF"
+  if [[ ! -f "$_NTM_TMUX_CONF" ]]; then
+    echo "Creating $_NTM_TMUX_CONF"
+    touch "$_NTM_TMUX_CONF"
   fi
 
   if _ntm_tmux_conf_installed; then
@@ -695,13 +713,13 @@ _ntm_offer_tmux_conf_tweaks() {
 
   echo ""
   echo "Optional: add recommended tmux.conf tweaks for better agent panes."
-  printf "Add these tmux settings to %s? [y/N]: " "$TMUX_CONF"
+  printf "Add these tmux settings to %s? [y/N]: " "$_NTM_TMUX_CONF"
   local answer
   read -r answer
   case "$answer" in
     y|Y|yes|YES)
-      backup_file "$TMUX_CONF"
-      cat >> "$TMUX_CONF" <<'TMUXCONF'
+      _ntm_backup_file "$_NTM_TMUX_CONF"
+      cat >> "$_NTM_TMUX_CONF" <<'TMUXCONF'
 
 # === NTM-TMUX-TWEAKS-START ===
 # Added by add_useful_tmux_commands_to_zshrc.sh
@@ -727,7 +745,7 @@ set -g base-index 1
 setw -g pane-base-index 1
 # === NTM-TMUX-TWEAKS-END ===
 TMUXCONF
-      echo "Added tmux.conf tweaks. Reload with: tmux source-file \"$TMUX_CONF\""
+      echo "Added tmux.conf tweaks. Reload with: tmux source-file \"$_NTM_TMUX_CONF\""
       ;;
     *)
       echo "Skipped tmux.conf tweaks."
@@ -1035,27 +1053,27 @@ add-agents-to-named-tmux() {
   local pane_id
 
   for ((i=1; i<=cc_count; i++)); do
-    tmux split-window -t "$win_target" -c "$dir"
+    pane_id=$(tmux split-window -t "$win_target" -c "$dir" -P -F "#{pane_id}")
     tmux select-layout -t "$win_target" tiled
-    pane_id=$(tmux list-panes -t "$win_target" -F '#{pane_index}' | tail -1)
-    tmux select-pane -t "$win_target.$pane_id" -T "${session}__cc_added_${i}"
-    tmux send-keys -t "$win_target.$pane_id" "cd \"$dir\" && cc" C-m
+    tmux select-pane -t "$pane_id" -T "${session}__cc_added_${i}"
+    tmux send-keys -t "$pane_id" -l "cd \"$dir\" && cc"
+    tmux send-keys -t "$pane_id" C-m
   done
 
   for ((i=1; i<=cod_count; i++)); do
-    tmux split-window -t "$win_target" -c "$dir"
+    pane_id=$(tmux split-window -t "$win_target" -c "$dir" -P -F "#{pane_id}")
     tmux select-layout -t "$win_target" tiled
-    pane_id=$(tmux list-panes -t "$win_target" -F '#{pane_index}' | tail -1)
-    tmux select-pane -t "$win_target.$pane_id" -T "${session}__cod_added_${i}"
-    tmux send-keys -t "$win_target.$pane_id" "cd \"$dir\" && cod" C-m
+    tmux select-pane -t "$pane_id" -T "${session}__cod_added_${i}"
+    tmux send-keys -t "$pane_id" -l "cd \"$dir\" && cod"
+    tmux send-keys -t "$pane_id" C-m
   done
 
   for ((i=1; i<=gmi_count; i++)); do
-    tmux split-window -t "$win_target" -c "$dir"
+    pane_id=$(tmux split-window -t "$win_target" -c "$dir" -P -F "#{pane_id}")
     tmux select-layout -t "$win_target" tiled
-    pane_id=$(tmux list-panes -t "$win_target" -F '#{pane_index}' | tail -1)
-    tmux select-pane -t "$win_target.$pane_id" -T "${session}__gmi_added_${i}"
-    tmux send-keys -t "$win_target.$pane_id" "cd \"$dir\" && gmi" C-m
+    tmux select-pane -t "$pane_id" -T "${session}__gmi_added_${i}"
+    tmux send-keys -t "$pane_id" -l "cd \"$dir\" && gmi"
+    tmux send-keys -t "$pane_id" C-m
   done
 
   echo "✓ Added ${cc_count}x cc, ${cod_count}x cod, ${gmi_count}x gmi"
@@ -1274,7 +1292,7 @@ send-command-to-named-tmux() {
 
   local count=0
   local start_idx=1
-  if $skip_first; then
+  if [[ "$skip_first" == true ]]; then
     start_idx=2
   fi
 
@@ -1289,7 +1307,8 @@ send-command-to-named-tmux() {
       continue
     fi
 
-    tmux send-keys -t "$pane_id" "$cmd" C-m
+    tmux send-keys -t "$pane_id" -l "$cmd"
+    tmux send-keys -t "$pane_id" C-m
     ((count++))
   done
 
@@ -1648,8 +1667,6 @@ quick-project-setup() {
 
 # Default locations for command palette
 _NTM_PALETTE_CONFIG="${NTM_PALETTE_CONFIG:-$HOME/.config/ntm/command_palette.md}"
-_NTM_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ntm-logs"
-_NTM_PROMPT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ntm-prompts"
 
 # ============================================================================
 # Visual Theme & Icons for Command Palette
@@ -2220,7 +2237,8 @@ ntm-palette() {
       if [[ -n "$pane_idx" ]]; then
         local target="$session:$first_win.$pane_idx"
         if tmux display-message -t "$target" -p '#{pane_id}' &>/dev/null; then
-          tmux send-keys -t "$target" "$cmd_prompt" C-m
+          tmux send-keys -t "$target" -l "$cmd_prompt"
+          tmux send-keys -t "$target" C-m
           echo -e "\n${_C_CYAN}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to pane $pane_idx${_C_RESET}"
         else
           echo -e "\n${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Pane $pane_idx not found" >&2
@@ -2410,13 +2428,13 @@ ntm-palette-bind() {
     echo "Note: Not in tmux. Binding will work in future sessions."
   fi
 
-  # Bind immediately for current server
+  # Bind immediately for current server (use zsh -ic for interactive mode so .zshrc loads fully)
   tmux bind-key -n "$key" display-popup -E -w 90% -h 90% \
-    "source ~/.zshrc 2>/dev/null; ntm-palette-interactive" 2>/dev/null
+    "zsh -ic ntm-palette-interactive" 2>/dev/null
 
   # Add to tmux.conf for persistence
   local tmux_conf="$HOME/.tmux.conf"
-  local bind_line="bind-key -n $key display-popup -E -w 90% -h 90% \"source ~/.zshrc 2>/dev/null; ntm-palette-interactive\""
+  local bind_line="bind-key -n $key display-popup -E -w 90% -h 90% \"zsh -ic ntm-palette-interactive\""
 
   if [[ -f "$tmux_conf" ]]; then
     if grep -q "bind-key -n $key" "$tmux_conf" 2>/dev/null; then
