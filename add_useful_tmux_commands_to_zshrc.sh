@@ -11,8 +11,11 @@
 set -euo pipefail
 
 ZSHRC="${HOME}/.zshrc"
+TMUX_CONF="${HOME}/.tmux.conf"
 MARKER_START="# === NAMED-TMUX-COMMANDS-START ==="
 MARKER_END="# === NAMED-TMUX-COMMANDS-END ==="
+TMUX_MARKER_START="# === NTM-TMUX-TWEAKS-START ==="
+TMUX_MARKER_END="# === NTM-TMUX-TWEAKS-END ==="
 
 # Check if the command block is already installed
 is_installed() {
@@ -39,6 +42,79 @@ backup_zshrc() {
   backup="${ZSHRC}.backup.$(date +%Y%m%d_%H%M%S)"
   cp "$ZSHRC" "$backup"
   echo "Created backup: $backup"
+}
+
+# Generic backup helper for other files (e.g., tmux.conf)
+backup_file() {
+  local file="$1"
+  local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
+  cp "$file" "$backup"
+  echo "Created backup: $backup"
+}
+
+# Check if tmux.conf tweaks are already present (installer-level)
+tmux_conf_installed() {
+  grep -q "$TMUX_MARKER_START" "$TMUX_CONF" 2>/dev/null && \
+  grep -q "$TMUX_MARKER_END" "$TMUX_CONF" 2>/dev/null
+}
+
+# Offer to add tmux.conf tweaks safely and idempotently
+offer_tmux_conf_tweaks() {
+  # Non-interactive (e.g., curl | bash without tty) — skip quietly
+  if [[ ! -t 0 ]]; then
+    return 0
+  fi
+
+  # Ensure the tmux.conf exists so we can append
+  if [[ ! -f "$TMUX_CONF" ]]; then
+    echo "Creating $TMUX_CONF"
+    touch "$TMUX_CONF"
+  fi
+
+  if tmux_conf_installed; then
+    return 0
+  fi
+
+  echo ""
+  echo "Optional: add recommended tmux.conf tweaks for better pane management."
+  printf "Add them to %s now? [y/N]: " "$TMUX_CONF"
+  local answer
+  read -r answer
+  case "$answer" in
+    y|Y|yes|YES)
+      backup_file "$TMUX_CONF"
+      cat >> "$TMUX_CONF" <<'TMUXCONF'
+
+# === NTM-TMUX-TWEAKS-START ===
+# Added by add_useful_tmux_commands_to_zshrc.sh
+# Increase scrollback buffer (default is 2000)
+set-option -g history-limit 50000
+
+# Enable mouse support for pane selection
+set -g mouse on
+
+# Show pane titles in status bar
+set -g pane-border-status top
+set -g pane-border-format " #{pane_title} "
+
+# Better colors for pane borders
+set -g pane-border-style fg=colour238
+set -g pane-active-border-style fg=colour39
+
+# Faster key repetition
+set -s escape-time 0
+
+# Start windows and panes at 1, not 0 (optional)
+set -g base-index 1
+setw -g pane-base-index 1
+# === NTM-TMUX-TWEAKS-END ===
+TMUXCONF
+      echo "Added tmux.conf tweaks. Reload with: tmux source-file \"$TMUX_CONF\""
+      ;;
+    *)
+      echo "Skipped tmux.conf tweaks."
+      ;;
+  esac
 }
 
 OH_MY_ZSH_DIR="${ZSH:-$HOME/.oh-my-zsh}"
@@ -366,6 +442,71 @@ _ntm_check_tmux() {
     *)
       echo "Please install tmux manually and retry." >&2
       return 1
+      ;;
+  esac
+}
+
+# Determine if the tmux.conf tweaks have already been added
+_ntm_tmux_conf_installed() {
+  grep -q "$TMUX_MARKER_START" "$TMUX_CONF" 2>/dev/null && \
+  grep -q "$TMUX_MARKER_END" "$TMUX_CONF" 2>/dev/null
+}
+
+# Offer to add helpful tmux.conf defaults (idempotent and optional)
+_ntm_offer_tmux_conf_tweaks() {
+  # Skip in non-interactive shells
+  if [[ ! -t 0 ]]; then
+    return 0
+  fi
+
+  # Ensure tmux.conf exists
+  if [[ ! -f "$TMUX_CONF" ]]; then
+    echo "Creating $TMUX_CONF"
+    touch "$TMUX_CONF"
+  fi
+
+  if _ntm_tmux_conf_installed; then
+    return 0
+  fi
+
+  echo ""
+  echo "Optional: add recommended tmux.conf tweaks for better agent panes."
+  printf "Add these tmux settings to %s? [y/N]: " "$TMUX_CONF"
+  local answer
+  read -r answer
+  case "$answer" in
+    y|Y|yes|YES)
+      backup_file "$TMUX_CONF"
+      cat >> "$TMUX_CONF" <<'TMUXCONF'
+
+# === NTM-TMUX-TWEAKS-START ===
+# Added by add_useful_tmux_commands_to_zshrc.sh
+# Increase scrollback buffer (default is 2000)
+set-option -g history-limit 50000
+
+# Enable mouse support for pane selection
+set -g mouse on
+
+# Show pane titles in status bar
+set -g pane-border-status top
+set -g pane-border-format " #{pane_title} "
+
+# Better colors for pane borders
+set -g pane-border-style fg=colour238
+set -g pane-active-border-style fg=colour39
+
+# Faster key repetition
+set -s escape-time 0
+
+# Start windows and panes at 1, not 0 (optional)
+set -g base-index 1
+setw -g pane-base-index 1
+# === NTM-TMUX-TWEAKS-END ===
+TMUXCONF
+      echo "Added tmux.conf tweaks. Reload with: tmux source-file \"$TMUX_CONF\""
+      ;;
+    *)
+      echo "Skipped tmux.conf tweaks."
       ;;
   esac
 }
@@ -1039,6 +1180,15 @@ copy-pane-output() {
     echo "error: could not determine first window for session '$session'" >&2
     return 1
   fi
+
+  # Use default pane if none provided (respects pane-base-index)
+  if [[ -z "$pane" ]]; then
+    if ! pane=$(_ntm_default_pane_index "$session"); then
+      echo "error: could not determine default pane for session '$session'" >&2
+      return 1
+    fi
+  fi
+
   local target="$session:$first_win.$pane"
 
   # Capture pane content
@@ -1235,16 +1385,666 @@ quick-project-setup() {
 
     # Initialize git if not already a repo
     if [[ ! -d "$dir/.git" ]]; then
-      echo "Initializing git repository..."
-      git -C "$dir" init
-      echo "# $project" > "$dir/README.md"
-      git -C "$dir" add README.md
-      git -C "$dir" commit -m "Initial commit"
+      if command -v git &>/dev/null; then
+        echo "Initializing git repository..."
+        git -C "$dir" init
+        echo "# $project" > "$dir/README.md"
+        git -C "$dir" add README.md
+        if ! git -C "$dir" commit -m "Initial commit"; then
+          echo "warning: initial git commit failed (likely missing git user.name/email); repository left uncommitted" >&2
+        fi
+      else
+        echo "warning: git not found; skipping git init for $dir" >&2
+      fi
     fi
   fi
 
   # Spawn agents
   spawn-agents-in-named-tmux "$project" "$cc_count" "$cod_count" "$gmi_count"
+}
+
+# ============================================================================
+# Command Palette
+# ============================================================================
+
+# Default locations for command palette
+_NTM_PALETTE_CONFIG="${NTM_PALETTE_CONFIG:-$HOME/.config/ntm/command_palette.md}"
+_NTM_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ntm-logs"
+_NTM_PROMPT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ntm-prompts"
+
+# Check if fzf is installed
+_ntm_check_fzf() {
+  command -v fzf &>/dev/null
+}
+
+# Auto-install fzf if needed
+_ntm_auto_install_fzf() {
+  local os
+  os="$(uname -s)"
+
+  if [[ "$os" == "Darwin" ]]; then
+    if command -v brew &>/dev/null; then
+      echo "Installing fzf via Homebrew..."
+      if brew install fzf; then
+        echo "✓ fzf installed successfully"
+        return 0
+      fi
+      echo "brew install fzf failed." >&2
+      return 1
+    else
+      echo "Homebrew not found. Install from https://brew.sh then run 'brew install fzf'." >&2
+      return 1
+    fi
+  else
+    # Linux
+    if command -v apt-get &>/dev/null; then
+      echo "Installing fzf via apt..."
+      if sudo apt-get update && sudo apt-get install -y fzf; then
+        echo "✓ fzf installed successfully"
+        return 0
+      fi
+    elif command -v dnf &>/dev/null; then
+      echo "Installing fzf via dnf..."
+      if sudo dnf install -y fzf; then
+        echo "✓ fzf installed successfully"
+        return 0
+      fi
+    elif command -v pacman &>/dev/null; then
+      echo "Installing fzf via pacman..."
+      if sudo pacman -S --noconfirm fzf; then
+        echo "✓ fzf installed successfully"
+        return 0
+      fi
+    fi
+    echo "Could not auto-install fzf. Please install manually:" >&2
+    echo "  https://github.com/junegunn/fzf#installation" >&2
+    return 1
+  fi
+}
+
+# Ensure fzf is available, offering to install if not
+_ntm_ensure_fzf() {
+  if _ntm_check_fzf; then
+    return 0
+  fi
+
+  echo "fzf is required for the command palette but is not installed."
+  printf "Install fzf now? [y/N]: "
+  local answer
+  read -r answer
+  case "$answer" in
+    y|Y|yes|YES)
+      _ntm_auto_install_fzf
+      return $?
+      ;;
+    *)
+      echo "Command palette requires fzf. Aborting." >&2
+      return 1
+      ;;
+  esac
+}
+
+# Parse command_palette.md (new format with ### headers)
+# Output: key\tlabel\tprompt (tab-separated)
+_ntm_parse_palette_config() {
+  local config_file="$1"
+  local current_key=""
+  local current_label=""
+  local current_prompt=""
+  local in_prompt=false
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Skip empty lines at start of prompt
+    if [[ "$in_prompt" == false ]] && [[ -z "$line" ]]; then
+      continue
+    fi
+
+    # Category header (## Category) - output previous and reset
+    if [[ "$line" == \#\#[[:space:]]* ]] && [[ "$line" != \#\#\#* ]]; then
+      if [[ -n "$current_key" ]] && [[ -n "$current_prompt" ]]; then
+        local escaped_prompt="${current_prompt//$'\n'/\\n}"
+        escaped_prompt="${escaped_prompt//$'\t'/ }"
+        printf '%s\t%s\t%s\n' "$current_key" "$current_label" "$escaped_prompt"
+      fi
+      current_key=""
+      current_label=""
+      current_prompt=""
+      in_prompt=false
+      continue
+    fi
+
+    # Command header (### key | label) or (### key)
+    if [[ "$line" == \#\#\#[[:space:]]* ]]; then
+      # Output previous command if exists
+      if [[ -n "$current_key" ]] && [[ -n "$current_prompt" ]]; then
+        local escaped_prompt="${current_prompt//$'\n'/\\n}"
+        escaped_prompt="${escaped_prompt//$'\t'/ }"
+        printf '%s\t%s\t%s\n' "$current_key" "$current_label" "$escaped_prompt"
+      fi
+
+      # Parse the header line manually (more reliable than regex captures)
+      local header="${line#\#\#\# }"
+      header="${header#\#\#\#	}"  # Also handle tab after ###
+
+      if [[ "$header" == *"|"* ]]; then
+        # Has label: ### key | label
+        current_key="${header%%|*}"
+        current_label="${header#*|}"
+      else
+        # No label: ### key
+        current_key="$header"
+        current_label="$header"
+      fi
+
+      # Trim whitespace
+      current_key=$(echo "$current_key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      current_label=$(echo "$current_label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+      current_prompt=""
+      in_prompt=true
+      continue
+    fi
+
+    # Prompt text
+    if [[ "$in_prompt" == true ]]; then
+      if [[ -z "$current_prompt" ]]; then
+        current_prompt="$line"
+      else
+        current_prompt="$current_prompt"$'\n'"$line"
+      fi
+    fi
+  done < "$config_file"
+
+  # Output last command
+  if [[ -n "$current_key" ]] && [[ -n "$current_prompt" ]]; then
+    local escaped_prompt="${current_prompt//$'\n'/\\n}"
+    escaped_prompt="${escaped_prompt//$'\t'/ }"
+    printf '%s\t%s\t%s\n' "$current_key" "$current_label" "$escaped_prompt"
+  fi
+}
+
+# Parse legacy format (markdown table with | key | prompt |)
+_ntm_parse_legacy_palette() {
+  local config_file="$1"
+
+  while IFS= read -r line; do
+    # Skip empty lines
+    [[ -z "$line" ]] && continue
+
+    # Check leading character - must start with |
+    local first="${line:0:1}"
+    [[ "$first" != "|" ]] && continue
+
+    # Skip header row (contains "icon")
+    [[ "$line" == *"icon"* ]] && continue
+
+    # Skip separator row (contains ---)
+    [[ "$line" == *"---"* ]] && continue
+
+    # Parse: | key | prompt |
+    # Remove leading |
+    local content="${line#|}"
+    # Remove trailing |
+    content="${content%|}"
+
+    # Split on | - first field is key, rest is prompt
+    local key="${content%%|*}"
+    local prompt="${content#*|}"
+
+    # Trim whitespace using sed
+    key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    prompt=$(echo "$prompt" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    # Skip if key is empty
+    [[ -z "$key" ]] && continue
+
+    printf '%s\t%s\t%s\n' "$key" "$key" "$prompt"
+  done < "$config_file"
+}
+
+# Detect config format and parse
+_ntm_load_palette_commands() {
+  local config_file="$1"
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "Config file not found: $config_file" >&2
+    return 1
+  fi
+
+  # Check format: legacy table has | in first lines
+  if head -5 "$config_file" | grep -q '^|'; then
+    _ntm_parse_legacy_palette "$config_file"
+  else
+    _ntm_parse_palette_config "$config_file"
+  fi
+}
+
+# Main command palette function
+ntm-palette() {
+  _ntm_check_tmux || return 1
+  _ntm_ensure_fzf || return 1
+
+  local session="$1"
+  local config_file="${2:-$_NTM_PALETTE_CONFIG}"
+
+  # Auto-detect session if in tmux
+  if [[ -z "$session" ]] && [[ -n "$TMUX" ]]; then
+    session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+  fi
+
+  if [[ -z "$session" ]]; then
+    echo "usage: ntm-palette <session> [config-file]" >&2
+    echo "       ncp <session> [config-file]" >&2
+    echo ""
+    echo "Or run from within a tmux session to auto-detect."
+    echo "Config: $config_file"
+    [[ -f "$config_file" ]] || echo "  (not found - run 'ntm-palette-init' to create)"
+    return 1
+  fi
+
+  if ! tmux has-session -t "$session" 2>/dev/null; then
+    echo "Session '$session' not found" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "Config not found: $config_file" >&2
+    echo "Run 'ntm-palette-init' to create a sample config."
+    return 1
+  fi
+
+  # Load commands into temp file (cleaned up at end of function)
+  local tmp_commands
+  tmp_commands=$(mktemp)
+
+  _ntm_load_palette_commands "$config_file" > "$tmp_commands"
+
+  if [[ ! -s "$tmp_commands" ]]; then
+    rm -f "$tmp_commands"
+    echo "No commands found in config file" >&2
+    return 1
+  fi
+
+  # Preview script for fzf - use printf for safer output
+  local preview_cmd='
+    line={}
+    prompt=$(printf "%s" "$line" | cut -f3)
+    printf "%s" "$prompt" | sed "s/\\\\n/\n/g" | fold -s -w ${FZF_PREVIEW_COLUMNS:-80}
+  '
+
+  # Run fzf
+  local selected
+  selected=$(cat "$tmp_commands" | \
+    fzf --delimiter='\t' \
+        --with-nth=2 \
+        --preview "$preview_cmd" \
+        --preview-window=down:40%:wrap \
+        --header="Command Palette [$session] | Enter=select | Esc=cancel" \
+        --prompt="Filter: " \
+        --height=80% \
+        --border=rounded \
+        --info=inline \
+        --bind='ctrl-p:toggle-preview' \
+        --color='header:italic:cyan')
+
+  # Clean up temp file
+  rm -f "$tmp_commands"
+
+  if [[ -z "$selected" ]]; then
+    echo "No command selected"
+    return 0
+  fi
+
+  local cmd_key cmd_label cmd_prompt
+  cmd_key=$(echo "$selected" | cut -f1)
+  cmd_label=$(echo "$selected" | cut -f2)
+  cmd_prompt=$(echo "$selected" | cut -f3 | sed 's/\\n/\n/g')
+
+  # Target selector
+  echo ""
+  echo "Selected: $cmd_label"
+  echo "─────────────────────────────────────────────"
+  echo ""
+  echo "Send to:"
+  echo "  [1] All agents"
+  echo "  [2] Claude (cc)"
+  echo "  [3] Codex (cod)"
+  echo "  [4] Gemini (gmi)"
+  echo "  [5] Specific pane..."
+  echo "  [q] Cancel"
+  echo ""
+  printf "Choice [1-5, q]: "
+
+  local target_choice
+  read -r target_choice
+
+  case "$target_choice" in
+    1) broadcast-prompt "$session" "all" "$cmd_prompt" ;;
+    2) broadcast-prompt "$session" "cc" "$cmd_prompt" ;;
+    3) broadcast-prompt "$session" "cod" "$cmd_prompt" ;;
+    4) broadcast-prompt "$session" "gmi" "$cmd_prompt" ;;
+    5)
+      echo ""
+      echo "Available panes:"
+      local first_win
+      first_win=$(_ntm_first_window "$session" 2>/dev/null) || first_win="0"
+      tmux list-panes -t "$session:$first_win" -F '  #{pane_index}: #{pane_title}' 2>/dev/null
+      echo ""
+      printf "Enter pane index: "
+      local pane_idx
+      read -r pane_idx
+      if [[ -n "$pane_idx" ]]; then
+        local target="$session:$first_win.$pane_idx"
+        if tmux display-message -t "$target" -p '#{pane_id}' &>/dev/null; then
+          tmux send-keys -t "$target" "$cmd_prompt" C-m
+          echo "✓ Sent to pane $pane_idx"
+        else
+          echo "Pane $pane_idx not found" >&2
+          return 1
+        fi
+      fi
+      ;;
+    q|Q|"")
+      echo "Cancelled"
+      return 0
+      ;;
+    *)
+      echo "Invalid choice" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Fully interactive palette with fzf for everything
+ntm-palette-interactive() {
+  _ntm_check_tmux || return 1
+  _ntm_ensure_fzf || return 1
+
+  local session="$1"
+  local config_file="${2:-$_NTM_PALETTE_CONFIG}"
+
+  # Auto-detect or select session
+  if [[ -z "$session" ]]; then
+    if [[ -n "$TMUX" ]]; then
+      session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+    else
+      local sessions
+      sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+      if [[ -z "$sessions" ]]; then
+        echo "No tmux sessions found" >&2
+        return 1
+      fi
+      session=$(echo "$sessions" | fzf --header="Select session" --height=40% --border)
+      [[ -z "$session" ]] && return 0
+    fi
+  fi
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "Config not found: $config_file" >&2
+    return 1
+  fi
+
+  # Load commands into temp file (cleaned up at end of function)
+  local tmp_commands
+  tmp_commands=$(mktemp)
+
+  _ntm_load_palette_commands "$config_file" > "$tmp_commands"
+
+  if [[ ! -s "$tmp_commands" ]]; then
+    rm -f "$tmp_commands"
+    echo "No commands found in config file" >&2
+    return 1
+  fi
+
+  local preview_cmd='
+    line={}
+    prompt=$(printf "%s" "$line" | cut -f3)
+    printf "%s" "$prompt" | sed "s/\\\\n/\n/g" | fold -s -w ${FZF_PREVIEW_COLUMNS:-80}
+  '
+
+  local selected
+  selected=$(cat "$tmp_commands" | \
+    fzf --delimiter='\t' \
+        --with-nth=2 \
+        --preview "$preview_cmd" \
+        --preview-window=down:40%:wrap \
+        --header="Command Palette | Session: $session" \
+        --prompt="Command: " \
+        --height=90% \
+        --border=rounded \
+        --bind='ctrl-p:toggle-preview')
+
+  # Clean up temp file
+  rm -f "$tmp_commands"
+
+  [[ -z "$selected" ]] && return 0
+
+  local cmd_prompt
+  cmd_prompt=$(echo "$selected" | cut -f3 | sed 's/\\n/\n/g')
+
+  # Select target with fzf
+  local targets="all:All agents (skip user pane)
+cc:Claude agents only
+cod:Codex agents only
+gmi:Gemini agents only"
+
+  local target_selection
+  target_selection=$(echo "$targets" | \
+    fzf --delimiter=':' \
+        --with-nth=2 \
+        --header="Send to which agents?" \
+        --height=40% \
+        --border=rounded)
+
+  [[ -z "$target_selection" ]] && return 0
+
+  local target_type="${target_selection%%:*}"
+  broadcast-prompt "$session" "$target_type" "$cmd_prompt"
+}
+
+# Initialize sample config
+ntm-palette-init() {
+  local config_file="${1:-$_NTM_PALETTE_CONFIG}"
+  local config_dir
+  config_dir=$(dirname "$config_file")
+
+  if [[ -f "$config_file" ]]; then
+    echo "Config exists: $config_file"
+    printf "Overwrite? [y/N]: "
+    local answer
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *) echo "Aborted."; return 0 ;;
+    esac
+  fi
+
+  mkdir -p "$config_dir"
+
+  cat > "$config_file" << 'PALETTE_CONFIG'
+# NTM Command Palette
+#
+# Format:
+#   ## Category Name
+#   ### command_key | Display Label
+#   The prompt text (can be multiple lines)
+#
+# Usage: ntm-palette <session> or press F6 in tmux
+
+## Code Review
+
+### fresh_review | Fresh Eyes Review
+Great, now I want you to carefully read over all of the new code you just wrote and other existing code you just modified with "fresh eyes" looking super carefully for any obvious bugs, errors, problems, issues, confusion, etc. Carefully fix anything you uncover. Use ultrathink.
+
+### check_other_agents | Review Other Agents' Work
+Ok can you now turn your attention to reviewing the code written by your fellow agents and checking for any issues, bugs, errors, problems, inefficiencies, security problems, reliability issues, etc. and carefully diagnose their underlying root causes using first-principle analysis and then fix or revise them if necessary? Use ultrathink.
+
+### randomly_inspect | Random Code Inspection
+I want you to sort of randomly explore the code files in this project, choosing code files to deeply investigate and understand. Once you understand the purpose of the code, do a super careful check with "fresh eyes" to find any obvious bugs, problems, errors, issues, silly mistakes, etc. and then systematically correct them.
+
+## Git Operations
+
+### git_commit | Commit Changes
+Now, based on your knowledge of the project, commit all changed files now in a series of logically connected groupings with super detailed commit messages for each and then push. Take your time to do it right. Don't edit the code at all. Use ultrathink.
+
+### do_gh_flow | Full GitHub Flow
+Do all the GitHub stuff: commit, deploy, create tag, bump version, release, monitor gh actions, compute checksums, etc.
+
+## Task Management
+
+### do_all | Execute Everything
+OK, please do ALL of that now. Keep a super detailed, granular, and complete TODO list of all items so you don't lose track of anything and remember to complete all the tasks and sub-tasks!
+
+### next_task | Work on Next Task
+Pick the next task you can actually do usefully now and start coding on it immediately. Respond to any agent mail messages you've received first.
+
+## Agent Coordination
+
+### check_mail | Check Agent Mail
+Be sure to check your agent mail and to promptly respond if needed to any messages, and also acknowledge any contact requests.
+
+### introduce | Introduce to Agents
+Before doing anything else, read ALL of AGENTS.md, then register with MCP Agent Mail and introduce yourself to the other agents.
+
+## Investigation
+
+### read_and_investigate | Deep Investigation
+First read ALL of the AGENTS.md file and README.md file super carefully! Then use your code investigation agent mode to fully understand the code, technical architecture and purpose of the project.
+
+### fix_bug | Fix Bug
+I want you to very carefully diagnose and then fix the root underlying cause of the bugs/errors shown here, but fix them FOR REAL, not a superficial "bandaid" fix! Here are the details:
+
+## Quick Commands
+
+### ultrathink | Enable Deep Thinking
+Use ultrathink.
+
+### reread_agents | Reread AGENTS.md
+Reread AGENTS.md so it's still fresh in your mind.
+
+## UI/UX
+
+### build_ui | Build World-Class UI
+I want you to do a spectacular job building absolutely world-class UI/UX components, with an intense focus on making the most visually appealing, user-friendly, intuitive, slick, polished, "Stripe level" of quality UI/UX possible.
+
+### scrutinize_ui | Scrutinize UI/UX
+Super carefully scrutinize every aspect of the application workflow and look for things that seem sub-optimal, things that could obviously be improved from a user-friendliness and intuitiveness standpoint.
+PALETTE_CONFIG
+
+  echo "✓ Created: $config_file"
+  echo ""
+  echo "Edit this file to customize your commands."
+  echo "Run 'ntm-palette <session>' or press F6 in tmux."
+}
+
+# Setup tmux keybinding (default F6)
+ntm-palette-bind() {
+  local key="${1:-F6}"
+
+  if [[ -z "$TMUX" ]]; then
+    echo "Note: Not in tmux. Binding will work in future sessions."
+  fi
+
+  # Bind immediately for current server
+  tmux bind-key -n "$key" display-popup -E -w 90% -h 90% \
+    "source ~/.zshrc 2>/dev/null; ntm-palette-interactive" 2>/dev/null
+
+  # Add to tmux.conf for persistence
+  local tmux_conf="$HOME/.tmux.conf"
+  local bind_line="bind-key -n $key display-popup -E -w 90% -h 90% \"source ~/.zshrc 2>/dev/null; ntm-palette-interactive\""
+
+  if [[ -f "$tmux_conf" ]]; then
+    if grep -q "bind-key -n $key" "$tmux_conf" 2>/dev/null; then
+      echo "Binding for $key exists in $tmux_conf"
+      printf "Update it? [y/N]: "
+      local answer
+      read -r answer
+      case "$answer" in
+        y|Y|yes|YES)
+          local tmp_conf
+          tmp_conf=$(mktemp)
+          grep -v "bind-key -n $key" "$tmux_conf" > "$tmp_conf"
+          echo "$bind_line" >> "$tmp_conf"
+          mv "$tmp_conf" "$tmux_conf"
+          echo "✓ Updated $key binding"
+          ;;
+        *) echo "Skipped" ;;
+      esac
+    else
+      echo "$bind_line" >> "$tmux_conf"
+      echo "✓ Added $key binding to $tmux_conf"
+    fi
+  else
+    echo "$bind_line" > "$tmux_conf"
+    echo "✓ Created $tmux_conf with $key binding"
+  fi
+
+  echo ""
+  echo "Press $key in tmux to open the command palette."
+  echo "Run 'tmux source ~/.tmux.conf' to reload if needed."
+}
+
+# Quick palette without fzf (numbered list fallback)
+ntm-palette-quick() {
+  _ntm_check_tmux || return 1
+
+  local session="$1"
+  local config_file="${2:-$_NTM_PALETTE_CONFIG}"
+
+  if [[ -z "$session" ]] && [[ -n "$TMUX" ]]; then
+    session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+  fi
+
+  if [[ -z "$session" ]]; then
+    echo "usage: ntm-palette-quick <session>" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$config_file" ]]; then
+    echo "Config not found: $config_file" >&2
+    return 1
+  fi
+
+  local -a labels
+  local -a prompts
+  local i=1
+
+  while IFS=$'\t' read -r key label prompt; do
+    labels[$i]="$label"
+    prompts[$i]="$prompt"
+    printf "%2d) %s\n" "$i" "$label"
+    ((i++))
+  done < <(_ntm_load_palette_commands "$config_file")
+
+  echo ""
+  printf "Select [1-%d, q]: " "$((i-1))"
+  local choice
+  read -r choice
+
+  [[ "$choice" == "q" || "$choice" == "Q" ]] && return 0
+
+  if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -ge "$i" ]]; then
+    echo "Invalid selection" >&2
+    return 1
+  fi
+
+  local selected_prompt="${prompts[$choice]}"
+  selected_prompt=$(echo "$selected_prompt" | sed 's/\\n/\n/g')
+
+  echo ""
+  echo "Send to: [a]ll [c]laude co[d]ex [g]emini [q]uit"
+  printf "Choice: "
+  local target
+  read -r target
+
+  case "$target" in
+    a|A) broadcast-prompt "$session" "all" "$selected_prompt" ;;
+    c|C) broadcast-prompt "$session" "cc" "$selected_prompt" ;;
+    d|D) broadcast-prompt "$session" "cod" "$selected_prompt" ;;
+    g|G) broadcast-prompt "$session" "gmi" "$selected_prompt" ;;
+    q|Q|"") echo "Cancelled" ;;
+    *) echo "Invalid target" >&2; return 1 ;;
+  esac
 }
 
 # ============================================================================
@@ -1267,6 +2067,13 @@ alias znt='zoom-pane-in-named-tmux'
 alias bp='broadcast-prompt'
 alias qps='quick-project-setup'
 alias cad='check-agent-deps'
+
+# Command Palette aliases
+alias ncp='ntm-palette'
+alias ncpi='ntm-palette-interactive'
+alias ncpq='ntm-palette-quick'
+alias ncpinit='ntm-palette-init'
+alias ncpbind='ntm-palette-bind'
 
 # ============================================================================
 # Help Command
@@ -1370,6 +2177,29 @@ ntm() {
   echo -e "      ${M}Check if claude, codex, gemini CLIs are installed${R}"
   echo ""
 
+  echo -e "  ${B}COMMAND PALETTE${R} ${D}(requires fzf)${R}"
+  echo ""
+  echo -e "  ${B}${C}ntm-palette${R} ${D}(ncp)${R} ${G}[session] [config-file]${R}"
+  echo -e "      ${Y}ncp slidechase${R}"
+  echo -e "      ${M}Open command palette to send pre-configured prompts${R}"
+  echo ""
+  echo -e "  ${B}${C}ntm-palette-interactive${R} ${D}(ncpi)${R} ${G}[session]${R}"
+  echo -e "      ${Y}ncpi${R}"
+  echo -e "      ${M}Fully interactive palette (auto-detects session)${R}"
+  echo ""
+  echo -e "  ${B}${C}ntm-palette-init${R} ${D}(ncpinit)${R} ${G}[config-file]${R}"
+  echo -e "      ${Y}ncpinit${R}"
+  echo -e "      ${M}Create sample command palette config file${R}"
+  echo ""
+  echo -e "  ${B}${C}ntm-palette-bind${R} ${D}(ncpbind)${R} ${G}[key=F6]${R}"
+  echo -e "      ${Y}ncpbind F6${R}"
+  echo -e "      ${M}Bind key to open palette in tmux popup${R}"
+  echo ""
+  echo -e "  ${B}${C}ntm-palette-quick${R} ${D}(ncpq)${R} ${G}<session>${R}"
+  echo -e "      ${Y}ncpq slidechase${R}"
+  echo -e "      ${M}Simple numbered menu fallback (no fzf required)${R}"
+  echo ""
+
   echo -e "${D}─────────────────────────────────────────────────────────────────────────────────${R}"
 
   local os_info=""
@@ -1381,6 +2211,7 @@ ntm() {
 
   echo -e "  ${D}Platform:${R} $os_info  ${D}│${R}  ${D}Projects:${R} ${PROJECTS_BASE}"
   echo -e "  ${D}Aliases:${R}  cnt sat ant rnt lnt snt vnt znt sct int knt cpo sso bp qps cad"
+  echo -e "           ${D}ncp ncpi ncpq ncpinit ncpbind${R}"
   echo ""
 }
 
@@ -1410,10 +2241,17 @@ if (( $+functions[compdef] )); then
   compdef _ntm_complete_sessions add-agents-to-named-tmux ant
   compdef _ntm_complete_sessions interrupt-agents-in-named-tmux int
   compdef _ntm_complete_sessions broadcast-prompt bp
+  # Command palette completions
+  compdef _ntm_complete_sessions ntm-palette ncp
+  compdef _ntm_complete_sessions ntm-palette-interactive ncpi
+  compdef _ntm_complete_sessions ntm-palette-quick ncpq
 fi
 
 # === NAMED-TMUX-COMMANDS-END ===
 TMUX_COMMANDS
+
+  # Optionally add tmux.conf quality-of-life settings (idempotent)
+  offer_tmux_conf_tweaks
 
   echo ""
   echo "✓ Successfully added tmux commands to ~/.zshrc"

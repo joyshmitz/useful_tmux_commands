@@ -121,6 +121,22 @@ cpo myproject 2 1000   # Copy 1000 lines from pane 2 to clipboard
 sso myproject          # Save all pane outputs to timestamped log files
 ```
 
+### 🎨 Command Palette
+
+Invoke a fuzzy-searchable palette of pre-configured prompts with a single keystroke:
+
+```bash
+ntm-palette myproject              # Open palette for session
+ntm-palette-bind                   # Bind F6 to open palette in tmux popup
+ntm-palette-init                   # Create sample config file
+```
+
+Press **F6** (after binding) to open a floating palette with:
+- Fuzzy search through all commands
+- Preview of full prompt text
+- Quick selection by typing or arrow keys
+- Target selector (cc/cod/gmi/all/specific pane)
+
 ### 🔍 Pane Navigation
 
 ```bash
@@ -332,6 +348,54 @@ dlog myproject                   # Stop logging
 ```bash
 laa                              # Show all agents in all sessions
 ssi myproject                    # Detailed status for session
+```
+
+### Command Palette
+
+| Command | Alias | Arguments | Description |
+|---------|-------|-----------|-------------|
+| `ntm-palette` | `ncp` | `[session] [config-file]` | Open fzf palette for a session |
+| `ntm-palette-interactive` | `ncpi` | `[session]` | Fully interactive palette (for popup) |
+| `ntm-palette-init` | `ncpinit` | `[config-file]` | Create sample config file |
+| `ntm-palette-bind` | `ncpbind` | `[key=F6]` | Bind key to open palette in tmux popup |
+| `ntm-palette-quick` | `ncpq` | `<session>` | Simple numbered menu (no fzf needed) |
+
+**Config File Format:**
+
+The palette reads from `~/.config/ntm/command_palette.md`. Two formats are supported:
+
+**New format (recommended):**
+```markdown
+## Category Name
+
+### fix_bugs | Fix All Bugs
+Analyze the code and fix all bugs you find.
+
+### run_tests | Run Test Suite
+Run the full test suite and report results.
+```
+
+**Legacy markdown table format:**
+```markdown
+| key | Command String |
+| --- | --- |
+| fix_bugs | Analyze the code and fix all bugs... |
+```
+
+**Examples:**
+
+```bash
+ncpinit                          # Create ~/.config/ntm/command_palette.md
+ncpbind                          # Bind F6 to open palette
+ncpbind F5                       # Use F5 instead
+ncp myproject                    # Open palette for session
+ncpq myproject                   # Simple numbered list (no fzf)
+```
+
+**Quick Start:**
+```bash
+ncpinit && ncpbind               # Setup palette with F6 binding
+# Now press F6 in any tmux session to open the palette
 ```
 
 ### Cleanup
