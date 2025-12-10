@@ -359,8 +359,41 @@ auto_setup_palette() {
   # Create sample config if not exists
   if [[ ! -f "$palette_config" ]]; then
     echo "Creating command palette config..."
-    # This will be populated after the script is sourced
-    echo "✓ Palette config will be created at: $palette_config"
+    cat > "$palette_config" << 'EASY_PALETTE'
+# NTM Command Palette
+#
+# Format:
+#   ## Category Name
+#   ### command_key | Display Label
+#   The prompt text (can be multiple lines)
+
+## Code Review
+
+### fresh_review | Fresh Eyes Review
+I want you to carefully read over all of the code with "fresh eyes" looking for any obvious bugs, errors, problems, issues, confusion, etc. Carefully fix anything you uncover.
+
+### check_other_agents | Review Other Agents' Work
+Review the code written by your fellow agents and check for any issues, bugs, errors, problems, inefficiencies, security problems, reliability issues, etc.
+
+## Git Operations
+
+### git_commit | Commit Changes
+Commit all changed files in a series of logically connected groupings with detailed commit messages for each and then push.
+
+## Task Management
+
+### do_all | Execute Everything
+Please do ALL pending tasks now. Keep a detailed TODO list to track progress and complete all tasks.
+
+### next_task | Work on Next Task
+Pick the next task you can actually do usefully now and start coding on it immediately.
+
+## Quick Commands
+
+### ultrathink | Enable Deep Thinking
+Use ultrathink.
+EASY_PALETTE
+    echo "✓ Created palette config: $palette_config"
   else
     echo "✓ Palette config already exists"
   fi
@@ -547,31 +580,26 @@ _ntm_auto_install_tmux() {
         command -v tmux &>/dev/null && return 0
       fi
     elif command -v dnf &>/dev/null; then
-      pkg="dnf"
       echo "Running: sudo dnf install -y tmux"
       if sudo dnf install -y tmux; then
         command -v tmux &>/dev/null && return 0
       fi
     elif command -v yum &>/dev/null; then
-      pkg="yum"
       echo "Running: sudo yum install -y tmux"
       if sudo yum install -y tmux; then
         command -v tmux &>/dev/null && return 0
       fi
     elif command -v pacman &>/dev/null; then
-      pkg="pacman"
-      echo "Running: sudo pacman -Sy --noconfirm tmux"
-      if sudo pacman -Sy --noconfirm tmux; then
+      echo "Running: sudo pacman -S --noconfirm tmux"
+      if sudo pacman -S --noconfirm tmux; then
         command -v tmux &>/dev/null && return 0
       fi
     elif command -v zypper &>/dev/null; then
-      pkg="zypper"
       echo "Running: sudo zypper install -y tmux"
       if sudo zypper install -y tmux; then
         command -v tmux &>/dev/null && return 0
       fi
     elif command -v apk &>/dev/null; then
-      pkg="apk"
       echo "Running: sudo apk add tmux"
       if sudo apk add tmux; then
         command -v tmux &>/dev/null && return 0
@@ -708,6 +736,14 @@ _ntm_first_window() {
   first=$(tmux list-windows -t "$session" -F '#{window_index}' 2>/dev/null | head -1) || return 1
   [[ -n "$first" ]] || return 1
   echo "$first"
+}
+
+# Get the default pane index for a session, honoring pane-base-index
+_ntm_default_pane_index() {
+  local session="$1"
+  local first_win
+  first_win=$(_ntm_first_window "$session") || return 1
+  tmux list-panes -t "$session:$first_win" -F '#{pane_index}' 2>/dev/null | head -1
 }
 
 # ============================================================================
@@ -1910,7 +1946,13 @@ _ntm_show_target_menu() {
   echo ""
   echo -e "${_C_BOLD}${_C_CYAN}${TL}$(printf '%*s' $width '' | tr ' ' "$H")${TR}${_C_RESET}"
   echo -e "${_C_CYAN}${V}${_C_RESET}  ${_C_BOLD}${_C_BWHITE}$_NTM_ICON_TARGET  SELECT TARGET${_C_RESET}$(printf '%*s' $((width - 18)) '')${_C_CYAN}${V}${_C_RESET}"
-  echo -e "${_C_CYAN}${V}${_C_RESET}  ${_C_DIM}${cmd_label:0:$((width - 4))}${_C_RESET}$(printf '%*s' $((width - ${#cmd_label} - 2)) '')${_C_CYAN}${V}${_C_RESET}"
+
+  # Truncate label to fit
+  local display_label="${cmd_label:0:$((width - 4))}"
+  # Calculate padding based on displayed length
+  local padding=$((width - ${#display_label} - 2))
+  
+  echo -e "${_C_CYAN}${V}${_C_RESET}  ${_C_DIM}${display_label}${_C_RESET}$(printf '%*s' $padding '')${_C_CYAN}${V}${_C_RESET}"
   echo -e "${_C_CYAN}${V}$(printf '%*s' $width '' | tr ' ' "$H")${V}${_C_RESET}"
   echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
   echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BGREEN}1${_C_RESET}  ${_C_GREEN}$_NTM_ICON_ALL${_C_RESET}  ${_C_BWHITE}All Agents${_C_RESET}     ${_C_DIM}broadcast to all panes${_C_RESET}       ${_C_CYAN}${V}${_C_RESET}"
@@ -2125,6 +2167,10 @@ ntm-palette() {
 ntm-palette-interactive() {
   _ntm_check_tmux || return 1
   _ntm_ensure_fzf || return 1
+
+  # Initialize visual theme (colors and icons)
+  _ntm_init_colors
+  _ntm_init_icons
 
   local session="$1"
   local config_file="${2:-$_NTM_PALETTE_CONFIG}"
@@ -2669,10 +2715,11 @@ TMUX_COMMANDS
     echo "  ✓ NTM commands added to ~/.zshrc"
     echo "  ✓ tmux.conf tweaks (mouse, colors, status bar)"
     echo "  ✓ F6 keybinding for command palette"
+    echo "  ✓ Sample palette config (~/.config/ntm/command_palette.md)"
     echo ""
     echo "Next steps:"
     echo "  1. Run: source ~/.zshrc"
-    echo "  2. Run: ncpinit          (create command palette config)"
+    echo "  2. Edit: ~/.config/ntm/command_palette.md (customize commands)"
     echo "  3. Press F6 in tmux to open the command palette"
     echo ""
     echo "Quick start:"
