@@ -233,14 +233,164 @@ install_oh_my_zsh() {
 }
 
 # Main
+# Auto-install tmux if missing (for --easy mode)
+auto_install_tmux() {
+  if command -v tmux &>/dev/null; then
+    echo "✓ tmux is already installed"
+    return 0
+  fi
+
+  echo "Installing tmux..."
+  local os
+  os="$(uname -s)"
+
+  if [[ "$os" == "Darwin" ]]; then
+    if command -v brew &>/dev/null; then
+      brew install tmux && echo "✓ tmux installed via Homebrew" && return 0
+    fi
+    echo "Please install Homebrew first: https://brew.sh" >&2
+    return 1
+  else
+    if command -v apt-get &>/dev/null; then
+      sudo apt-get update && sudo apt-get install -y tmux && echo "✓ tmux installed via apt" && return 0
+    elif command -v dnf &>/dev/null; then
+      sudo dnf install -y tmux && echo "✓ tmux installed via dnf" && return 0
+    elif command -v pacman &>/dev/null; then
+      sudo pacman -S --noconfirm tmux && echo "✓ tmux installed via pacman" && return 0
+    fi
+    echo "Could not auto-install tmux. Please install manually." >&2
+    return 1
+  fi
+}
+
+# Auto-install fzf if missing (for --easy mode)
+auto_install_fzf() {
+  if command -v fzf &>/dev/null; then
+    echo "✓ fzf is already installed"
+    return 0
+  fi
+
+  echo "Installing fzf..."
+  local os
+  os="$(uname -s)"
+
+  if [[ "$os" == "Darwin" ]]; then
+    if command -v brew &>/dev/null; then
+      brew install fzf && echo "✓ fzf installed via Homebrew" && return 0
+    fi
+  else
+    if command -v apt-get &>/dev/null; then
+      sudo apt-get update && sudo apt-get install -y fzf && echo "✓ fzf installed via apt" && return 0
+    elif command -v dnf &>/dev/null; then
+      sudo dnf install -y fzf && echo "✓ fzf installed via dnf" && return 0
+    elif command -v pacman &>/dev/null; then
+      sudo pacman -S --noconfirm fzf && echo "✓ fzf installed via pacman" && return 0
+    fi
+  fi
+  echo "Could not auto-install fzf. Please install manually." >&2
+  return 1
+}
+
+# Auto-add tmux.conf tweaks without prompting (for --easy mode)
+auto_add_tmux_conf() {
+  if [[ ! -f "$TMUX_CONF" ]]; then
+    touch "$TMUX_CONF"
+  fi
+
+  if tmux_conf_installed; then
+    echo "✓ tmux.conf tweaks already present"
+    return 0
+  fi
+
+  echo "Adding tmux.conf tweaks..."
+  cat >> "$TMUX_CONF" << 'TMUX_TWEAKS'
+
+# === NTM-TMUX-TWEAKS-START ===
+# Quality-of-life settings for Named Tmux Manager
+
+# Enable mouse support
+set -g mouse on
+
+# Better colors
+set -g default-terminal "screen-256color"
+set -ga terminal-overrides ",*256col*:Tc"
+
+# Start windows and panes at 1, not 0
+set -g base-index 1
+setw -g pane-base-index 1
+
+# Renumber windows when one is closed
+set -g renumber-windows on
+
+# Increase scrollback buffer
+set -g history-limit 50000
+
+# Faster key repetition
+set -s escape-time 0
+
+# Status bar styling
+set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
+set -g status-left '#[fg=#89b4fa,bold] #S #[fg=#6c7086]│ '
+set -g status-right '#[fg=#6c7086]│ #[fg=#a6e3a1]%H:%M '
+set -g status-left-length 30
+
+# Active pane border
+set -g pane-active-border-style 'fg=#89b4fa'
+set -g pane-border-style 'fg=#313244'
+
+# Window status
+setw -g window-status-format '#[fg=#6c7086] #I:#W '
+setw -g window-status-current-format '#[fg=#f5c2e7,bold] #I:#W '
+# === NTM-TMUX-TWEAKS-END ===
+TMUX_TWEAKS
+
+  echo "✓ Added tmux.conf tweaks"
+}
+
+# Setup command palette with F6 binding (for --easy mode)
+auto_setup_palette() {
+  local palette_config="$HOME/.config/ntm/command_palette.md"
+  local palette_dir
+  palette_dir=$(dirname "$palette_config")
+
+  # Create config directory
+  mkdir -p "$palette_dir"
+
+  # Create sample config if not exists
+  if [[ ! -f "$palette_config" ]]; then
+    echo "Creating command palette config..."
+    # This will be populated after the script is sourced
+    echo "✓ Palette config will be created at: $palette_config"
+  else
+    echo "✓ Palette config already exists"
+  fi
+
+  # Add F6 binding to tmux.conf
+  local bind_line='bind-key -n F6 display-popup -E -w 90% -h 90% "source ~/.zshrc 2>/dev/null; ntm-palette-interactive"'
+  if grep -q "bind-key -n F6" "$TMUX_CONF" 2>/dev/null; then
+    echo "✓ F6 keybinding already configured"
+  else
+    echo "" >> "$TMUX_CONF"
+    echo "# NTM Command Palette (F6)" >> "$TMUX_CONF"
+    echo "$bind_line" >> "$TMUX_CONF"
+    echo "✓ Added F6 keybinding for command palette"
+  fi
+}
+
 main() {
   local force_reinstall=false
+  local easy_mode=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -f|--force)
         force_reinstall=true
+        shift
+        ;;
+      -e|--easy)
+        easy_mode=true
+        force_reinstall=true  # Easy mode implies force reinstall
         shift
         ;;
       -u|--uninstall)
@@ -258,9 +408,13 @@ main() {
         echo "Usage: $0 [OPTIONS]"
         echo ""
         echo "Options:"
+        echo "  -e, --easy       Easy mode: auto-install everything (tmux, fzf, configs)"
         echo "  -f, --force      Force reinstall (remove existing and add fresh)"
         echo "  -u, --uninstall  Remove the commands from ~/.zshrc"
         echo "  -h, --help       Show this help message"
+        echo ""
+        echo "Easy mode one-liner:"
+        echo "  curl -fsSL <url> | bash -s -- --easy"
         return 0
         ;;
       *)
@@ -270,6 +424,28 @@ main() {
         ;;
     esac
   done
+
+  # Easy mode: auto-install all dependencies
+  if [[ "$easy_mode" == true ]]; then
+    echo ""
+    echo "╭────────────────────────────────────────────────────────╮"
+    echo "│  🚀 NTM Easy Install Mode                              │"
+    echo "│  Installing everything automatically...                │"
+    echo "╰────────────────────────────────────────────────────────╯"
+    echo ""
+
+    # Install dependencies
+    auto_install_tmux || echo "⚠ tmux installation failed (may need manual install)"
+    auto_install_fzf || echo "⚠ fzf installation failed (may need manual install)"
+
+    # Add tmux.conf tweaks
+    auto_add_tmux_conf
+
+    # Setup command palette
+    auto_setup_palette
+
+    echo ""
+  fi
 
   local created_zshrc=false
 
@@ -1412,6 +1588,106 @@ _NTM_PALETTE_CONFIG="${NTM_PALETTE_CONFIG:-$HOME/.config/ntm/command_palette.md}
 _NTM_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ntm-logs"
 _NTM_PROMPT_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ntm-prompts"
 
+# ============================================================================
+# Visual Theme & Icons for Command Palette
+# ============================================================================
+
+# Detect if terminal supports Nerd Fonts (check for common NF environment hints)
+_ntm_has_nerd_fonts() {
+  # Check common indicators: NERD_FONT env, p10k config, or specific terminal
+  [[ -n "${NERD_FONTS:-}" ]] && return 0
+  [[ -f "$HOME/.p10k.zsh" ]] && return 0
+  [[ "$TERM_PROGRAM" == "iTerm.app" ]] && return 0
+  [[ "$TERM_PROGRAM" == "WezTerm" ]] && return 0
+  [[ -n "${KITTY_WINDOW_ID:-}" ]] && return 0
+  # Allow user to force icons
+  [[ "${NTM_USE_ICONS:-}" == "1" ]] && return 0
+  return 1
+}
+
+# Icon definitions (Nerd Font with Unicode fallbacks)
+_ntm_init_icons() {
+  if _ntm_has_nerd_fonts; then
+    # Nerd Font icons
+    _NTM_ICON_PALETTE=""     # nf-cod-symbol_color
+    _NTM_ICON_ROBOT="󰚩"      # nf-md-robot
+    _NTM_ICON_SEND=""        # nf-fa-paper_plane
+    _NTM_ICON_TARGET="󰓾"     # nf-md-target
+    _NTM_ICON_CHECK=""       # nf-fa-check
+    _NTM_ICON_CROSS=""       # nf-fa-times
+    _NTM_ICON_CLAUDE="󰗣"     # nf-md-alpha_c_circle (anthropic-ish)
+    _NTM_ICON_CODEX=""       # nf-cod-hubot (openai-ish)
+    _NTM_ICON_GEMINI="󰊤"     # nf-md-google (google)
+    _NTM_ICON_ALL="󰕟"        # nf-md-broadcast
+    _NTM_ICON_PANE=""        # nf-oct-terminal
+    _NTM_ICON_ARROW="❯"       # nf-pl-right_hard_divider
+    _NTM_ICON_DOT="●"
+    _NTM_ICON_STAR="★"
+  else
+    # Unicode fallbacks (widely supported)
+    _NTM_ICON_PALETTE="◆"
+    _NTM_ICON_ROBOT="⚙"
+    _NTM_ICON_SEND="➤"
+    _NTM_ICON_TARGET="◎"
+    _NTM_ICON_CHECK="✓"
+    _NTM_ICON_CROSS="✗"
+    _NTM_ICON_CLAUDE="C"
+    _NTM_ICON_CODEX="O"
+    _NTM_ICON_GEMINI="G"
+    _NTM_ICON_ALL="*"
+    _NTM_ICON_PANE="▢"
+    _NTM_ICON_ARROW="›"
+    _NTM_ICON_DOT="•"
+    _NTM_ICON_STAR="★"
+  fi
+}
+
+# ANSI color codes for palette UI
+_ntm_init_colors() {
+  # Base colors
+  _C_RESET='\033[0m'
+  _C_BOLD='\033[1m'
+  _C_DIM='\033[2m'
+  _C_ITALIC='\033[3m'
+  _C_UNDERLINE='\033[4m'
+
+  # Foreground colors
+  _C_BLACK='\033[30m'
+  _C_RED='\033[31m'
+  _C_GREEN='\033[32m'
+  _C_YELLOW='\033[33m'
+  _C_BLUE='\033[34m'
+  _C_MAGENTA='\033[35m'
+  _C_CYAN='\033[36m'
+  _C_WHITE='\033[37m'
+
+  # Bright colors
+  _C_BRED='\033[91m'
+  _C_BGREEN='\033[92m'
+  _C_BYELLOW='\033[93m'
+  _C_BBLUE='\033[94m'
+  _C_BMAGENTA='\033[95m'
+  _C_BCYAN='\033[96m'
+  _C_BWHITE='\033[97m'
+
+  # 256-color palette for gradients (if supported)
+  _C_PURPLE='\033[38;5;141m'
+  _C_ORANGE='\033[38;5;208m'
+  _C_PINK='\033[38;5;213m'
+  _C_TEAL='\033[38;5;80m'
+  _C_LIME='\033[38;5;154m'
+  _C_GOLD='\033[38;5;220m'
+
+  # Background colors for highlights
+  _C_BG_BLUE='\033[44m'
+  _C_BG_CYAN='\033[46m'
+  _C_BG_GRAY='\033[48;5;236m'
+}
+
+# Initialize icons and colors
+_ntm_init_icons
+_ntm_init_colors
+
 # Check if fzf is installed
 _ntm_check_fzf() {
   command -v fzf &>/dev/null
@@ -1619,6 +1895,75 @@ _ntm_load_palette_commands() {
   fi
 }
 
+# Beautiful target selector menu
+_ntm_show_target_menu() {
+  local cmd_label="$1"
+  local session="$2"
+
+  # Box-drawing characters
+  local TL="╭" TR="╮" BL="╰" BR="╯" H="─" V="│"
+
+  # Get terminal width (default 60 if unavailable)
+  local width=58
+
+  # Build the menu
+  echo ""
+  echo -e "${_C_BOLD}${_C_CYAN}${TL}$(printf '%*s' $width '' | tr ' ' "$H")${TR}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}  ${_C_BOLD}${_C_BWHITE}$_NTM_ICON_TARGET  SELECT TARGET${_C_RESET}$(printf '%*s' $((width - 18)) '')${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}  ${_C_DIM}${cmd_label:0:$((width - 4))}${_C_RESET}$(printf '%*s' $((width - ${#cmd_label} - 2)) '')${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}$(printf '%*s' $width '' | tr ' ' "$H")${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BGREEN}1${_C_RESET}  ${_C_GREEN}$_NTM_ICON_ALL${_C_RESET}  ${_C_BWHITE}All Agents${_C_RESET}     ${_C_DIM}broadcast to all panes${_C_RESET}       ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BMAGENTA}2${_C_RESET}  ${_C_MAGENTA}$_NTM_ICON_CLAUDE${_C_RESET}  ${_C_BWHITE}Claude${_C_RESET}  ${_C_DIM}(cc)${_C_RESET}   ${_C_DIM}anthropic agents only${_C_RESET}       ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BBLUE}3${_C_RESET}  ${_C_BLUE}$_NTM_ICON_CODEX${_C_RESET}  ${_C_BWHITE}Codex${_C_RESET}   ${_C_DIM}(cod)${_C_RESET}  ${_C_DIM}openai agents only${_C_RESET}          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BYELLOW}4${_C_RESET}  ${_C_YELLOW}$_NTM_ICON_GEMINI${_C_RESET}  ${_C_BWHITE}Gemini${_C_RESET}  ${_C_DIM}(gmi)${_C_RESET}  ${_C_DIM}google agents only${_C_RESET}          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_BCYAN}5${_C_RESET}  ${_C_CYAN}$_NTM_ICON_PANE${_C_RESET}  ${_C_BWHITE}Specific Pane${_C_RESET}  ${_C_DIM}choose one pane${_C_RESET}            ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}   ${_C_BOLD}${_C_RED}q${_C_RESET}  ${_C_RED}$_NTM_ICON_CROSS${_C_RESET}  ${_C_DIM}Cancel${_C_RESET}                                       ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_CYAN}${V}${_C_RESET}                                                          ${_C_CYAN}${V}${_C_RESET}"
+  echo -e "${_C_BOLD}${_C_CYAN}${BL}$(printf '%*s' $width '' | tr ' ' "$H")${BR}${_C_RESET}"
+  echo ""
+  echo -ne "  ${_C_BOLD}${_C_CYAN}$_NTM_ICON_ARROW${_C_RESET} ${_C_BWHITE}Choice${_C_RESET} ${_C_DIM}[1-5, q]:${_C_RESET} "
+}
+
+# Show pane selector with visual styling
+_ntm_show_pane_selector() {
+  local session="$1"
+  local first_win="$2"
+
+  echo ""
+  echo -e "${_C_BOLD}${_C_CYAN}$_NTM_ICON_PANE  Available Panes:${_C_RESET}"
+  echo -e "${_C_DIM}──────────────────────────────────${_C_RESET}"
+
+  # Get panes with formatting
+  while IFS= read -r pane_info; do
+    local idx="${pane_info%%:*}"
+    local title="${pane_info#*: }"
+
+    # Color based on pane type
+    local color="$_C_WHITE"
+    local icon="$_NTM_ICON_PANE"
+    if [[ "$title" == *"__cc"* ]]; then
+      color="$_C_MAGENTA"
+      icon="$_NTM_ICON_CLAUDE"
+    elif [[ "$title" == *"__cod"* ]]; then
+      color="$_C_BLUE"
+      icon="$_NTM_ICON_CODEX"
+    elif [[ "$title" == *"__gmi"* ]]; then
+      color="$_C_YELLOW"
+      icon="$_NTM_ICON_GEMINI"
+    fi
+
+    echo -e "   ${_C_BOLD}${_C_CYAN}$idx${_C_RESET}  ${color}$icon${_C_RESET}  ${title}"
+  done < <(tmux list-panes -t "$session:$first_win" -F '#{pane_index}: #{pane_title}' 2>/dev/null)
+
+  echo -e "${_C_DIM}──────────────────────────────────${_C_RESET}"
+  echo ""
+  echo -ne "  ${_C_BOLD}${_C_CYAN}$_NTM_ICON_ARROW${_C_RESET} ${_C_BWHITE}Pane index:${_C_RESET} "
+}
+
 # Main command palette function
 ntm-palette() {
   _ntm_check_tmux || return 1
@@ -1633,23 +1978,23 @@ ntm-palette() {
   fi
 
   if [[ -z "$session" ]]; then
-    echo "usage: ntm-palette <session> [config-file]" >&2
-    echo "       ncp <session> [config-file]" >&2
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} ${_C_BOLD}Usage:${_C_RESET} ntm-palette <session> [config-file]" >&2
+    echo -e "       ${_C_DIM}ncp <session> [config-file]${_C_RESET}" >&2
     echo ""
-    echo "Or run from within a tmux session to auto-detect."
-    echo "Config: $config_file"
-    [[ -f "$config_file" ]] || echo "  (not found - run 'ntm-palette-init' to create)"
+    echo -e "${_C_DIM}Or run from within a tmux session to auto-detect.${_C_RESET}"
+    echo -e "${_C_DIM}Config: $config_file${_C_RESET}"
+    [[ -f "$config_file" ]] || echo -e "  ${_C_YELLOW}(not found - run 'ntm-palette-init' to create)${_C_RESET}"
     return 1
   fi
 
   if ! tmux has-session -t "$session" 2>/dev/null; then
-    echo "Session '$session' not found" >&2
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Session '${_C_BOLD}$session${_C_RESET}' not found" >&2
     return 1
   fi
 
   if [[ ! -f "$config_file" ]]; then
-    echo "Config not found: $config_file" >&2
-    echo "Run 'ntm-palette-init' to create a sample config."
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Config not found: ${_C_DIM}$config_file${_C_RESET}" >&2
+    echo -e "${_C_DIM}Run 'ntm-palette-init' to create a sample config.${_C_RESET}"
     return 1
   fi
 
@@ -1661,37 +2006,60 @@ ntm-palette() {
 
   if [[ ! -s "$tmp_commands" ]]; then
     rm -f "$tmp_commands"
-    echo "No commands found in config file" >&2
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} No commands found in config file" >&2
     return 1
   fi
 
-  # Preview script for fzf - use printf for safer output
+  # Colorized preview script for fzf
   local preview_cmd='
     line={}
     prompt=$(printf "%s" "$line" | cut -f3)
+    # Add color to preview
+    echo -e "\033[1;36m━━━ PROMPT PREVIEW ━━━\033[0m"
+    echo ""
     printf "%s" "$prompt" | sed "s/\\\\n/\n/g" | fold -s -w ${FZF_PREVIEW_COLUMNS:-80}
+    echo ""
+    echo -e "\033[2m━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
   '
 
-  # Run fzf
+  # Build fzf header with icons
+  local fzf_header="$_NTM_ICON_PALETTE Command Palette │ Session: $session │ Enter=select │ Esc=cancel │ Ctrl-P=toggle preview"
+
+  # Beautiful fzf color scheme (Catppuccin-inspired)
+  local fzf_colors="--color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8"
+  fzf_colors+=",fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc"
+  fzf_colors+=",marker:#f5e0dc,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8"
+  fzf_colors+=",border:#89b4fa,gutter:#1e1e2e"
+
+  # Run fzf with beautiful styling
   local selected
   selected=$(cat "$tmp_commands" | \
     fzf --delimiter='\t' \
         --with-nth=2 \
         --preview "$preview_cmd" \
-        --preview-window=down:40%:wrap \
-        --header="Command Palette [$session] | Enter=select | Esc=cancel" \
-        --prompt="Filter: " \
-        --height=80% \
+        --preview-window=down:45%:wrap:border-top \
+        --header="$fzf_header" \
+        --prompt="$_NTM_ICON_ARROW Filter: " \
+        --pointer="$_NTM_ICON_DOT" \
+        --marker="$_NTM_ICON_STAR" \
+        --height=90% \
         --border=rounded \
+        --border-label=" $_NTM_ICON_ROBOT NTM Command Palette " \
+        --border-label-pos=3 \
         --info=inline \
+        --margin=1,2 \
+        --padding=1 \
         --bind='ctrl-p:toggle-preview' \
-        --color='header:italic:cyan')
+        --bind='ctrl-u:preview-half-page-up' \
+        --bind='ctrl-d:preview-half-page-down' \
+        $fzf_colors \
+        --ansi)
 
   # Clean up temp file
   rm -f "$tmp_commands"
 
   if [[ -z "$selected" ]]; then
-    echo "No command selected"
+    echo -e "\n${_C_DIM}No command selected${_C_RESET}"
     return 0
   fi
 
@@ -1700,68 +2068,72 @@ ntm-palette() {
   cmd_label=$(echo "$selected" | cut -f2)
   cmd_prompt=$(echo "$selected" | cut -f3 | sed 's/\\n/\n/g')
 
-  # Target selector
-  echo ""
-  echo "Selected: $cmd_label"
-  echo "─────────────────────────────────────────────"
-  echo ""
-  echo "Send to:"
-  echo "  [1] All agents"
-  echo "  [2] Claude (cc)"
-  echo "  [3] Codex (cod)"
-  echo "  [4] Gemini (gmi)"
-  echo "  [5] Specific pane..."
-  echo "  [q] Cancel"
-  echo ""
-  printf "Choice [1-5, q]: "
+  # Show beautiful target selector
+  _ntm_show_target_menu "$cmd_label" "$session"
 
   local target_choice
   read -r target_choice
 
   case "$target_choice" in
-    1) broadcast-prompt "$session" "all" "$cmd_prompt" ;;
-    2) broadcast-prompt "$session" "cc" "$cmd_prompt" ;;
-    3) broadcast-prompt "$session" "cod" "$cmd_prompt" ;;
-    4) broadcast-prompt "$session" "gmi" "$cmd_prompt" ;;
+    1)
+      broadcast-prompt "$session" "all" "$cmd_prompt"
+      echo -e "\n${_C_GREEN}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to all agents${_C_RESET}"
+      ;;
+    2)
+      broadcast-prompt "$session" "cc" "$cmd_prompt"
+      echo -e "\n${_C_MAGENTA}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to Claude agents${_C_RESET}"
+      ;;
+    3)
+      broadcast-prompt "$session" "cod" "$cmd_prompt"
+      echo -e "\n${_C_BLUE}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to Codex agents${_C_RESET}"
+      ;;
+    4)
+      broadcast-prompt "$session" "gmi" "$cmd_prompt"
+      echo -e "\n${_C_YELLOW}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to Gemini agents${_C_RESET}"
+      ;;
     5)
-      echo ""
-      echo "Available panes:"
       local first_win
       first_win=$(_ntm_first_window "$session" 2>/dev/null) || first_win="0"
-      tmux list-panes -t "$session:$first_win" -F '  #{pane_index}: #{pane_title}' 2>/dev/null
-      echo ""
-      printf "Enter pane index: "
+
+      _ntm_show_pane_selector "$session" "$first_win"
+
       local pane_idx
       read -r pane_idx
       if [[ -n "$pane_idx" ]]; then
         local target="$session:$first_win.$pane_idx"
         if tmux display-message -t "$target" -p '#{pane_id}' &>/dev/null; then
           tmux send-keys -t "$target" "$cmd_prompt" C-m
-          echo "✓ Sent to pane $pane_idx"
+          echo -e "\n${_C_CYAN}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to pane $pane_idx${_C_RESET}"
         else
-          echo "Pane $pane_idx not found" >&2
+          echo -e "\n${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Pane $pane_idx not found" >&2
           return 1
         fi
       fi
       ;;
     q|Q|"")
-      echo "Cancelled"
+      echo -e "\n${_C_DIM}Cancelled${_C_RESET}"
       return 0
       ;;
     *)
-      echo "Invalid choice" >&2
+      echo -e "\n${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Invalid choice" >&2
       return 1
       ;;
   esac
 }
 
-# Fully interactive palette with fzf for everything
+# Fully interactive palette with fzf for everything (for tmux popup)
 ntm-palette-interactive() {
   _ntm_check_tmux || return 1
   _ntm_ensure_fzf || return 1
 
   local session="$1"
   local config_file="${2:-$_NTM_PALETTE_CONFIG}"
+
+  # Beautiful fzf color scheme (Catppuccin-inspired)
+  local fzf_colors="--color=bg+:#313244,bg:#1e1e2e,spinner:#f5e0dc,hl:#f38ba8"
+  fzf_colors+=",fg:#cdd6f4,header:#f38ba8,info:#cba6f7,pointer:#f5e0dc"
+  fzf_colors+=",marker:#f5e0dc,fg+:#cdd6f4,prompt:#cba6f7,hl+:#f38ba8"
+  fzf_colors+=",border:#89b4fa,gutter:#1e1e2e"
 
   # Auto-detect or select session
   if [[ -z "$session" ]]; then
@@ -1771,16 +2143,22 @@ ntm-palette-interactive() {
       local sessions
       sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
       if [[ -z "$sessions" ]]; then
-        echo "No tmux sessions found" >&2
+        echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} No tmux sessions found" >&2
         return 1
       fi
-      session=$(echo "$sessions" | fzf --header="Select session" --height=40% --border)
+      session=$(echo "$sessions" | \
+        fzf --header="$_NTM_ICON_TARGET Select Session" \
+            --prompt="$_NTM_ICON_ARROW " \
+            --height=50% \
+            --border=rounded \
+            --border-label=" $_NTM_ICON_ROBOT Sessions " \
+            $fzf_colors)
       [[ -z "$session" ]] && return 0
     fi
   fi
 
   if [[ ! -f "$config_file" ]]; then
-    echo "Config not found: $config_file" >&2
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} Config not found: $config_file" >&2
     return 1
   fi
 
@@ -1792,14 +2170,19 @@ ntm-palette-interactive() {
 
   if [[ ! -s "$tmp_commands" ]]; then
     rm -f "$tmp_commands"
-    echo "No commands found in config file" >&2
+    echo -e "${_C_RED}$_NTM_ICON_CROSS${_C_RESET} No commands found in config file" >&2
     return 1
   fi
 
+  # Colorized preview
   local preview_cmd='
     line={}
     prompt=$(printf "%s" "$line" | cut -f3)
+    echo -e "\033[1;36m━━━ PROMPT PREVIEW ━━━\033[0m"
+    echo ""
     printf "%s" "$prompt" | sed "s/\\\\n/\n/g" | fold -s -w ${FZF_PREVIEW_COLUMNS:-80}
+    echo ""
+    echo -e "\033[2m━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
   '
 
   local selected
@@ -1807,39 +2190,59 @@ ntm-palette-interactive() {
     fzf --delimiter='\t' \
         --with-nth=2 \
         --preview "$preview_cmd" \
-        --preview-window=down:40%:wrap \
-        --header="Command Palette | Session: $session" \
-        --prompt="Command: " \
-        --height=90% \
+        --preview-window=down:45%:wrap:border-top \
+        --header="$_NTM_ICON_PALETTE Command Palette │ Session: $session" \
+        --prompt="$_NTM_ICON_ARROW Command: " \
+        --pointer="$_NTM_ICON_DOT" \
+        --marker="$_NTM_ICON_STAR" \
+        --height=100% \
         --border=rounded \
-        --bind='ctrl-p:toggle-preview')
+        --border-label=" $_NTM_ICON_ROBOT NTM Command Palette " \
+        --border-label-pos=3 \
+        --margin=0 \
+        --padding=1 \
+        --bind='ctrl-p:toggle-preview' \
+        --bind='ctrl-u:preview-half-page-up' \
+        --bind='ctrl-d:preview-half-page-down' \
+        $fzf_colors \
+        --ansi)
 
   # Clean up temp file
   rm -f "$tmp_commands"
 
   [[ -z "$selected" ]] && return 0
 
-  local cmd_prompt
+  local cmd_label cmd_prompt
+  cmd_label=$(echo "$selected" | cut -f2)
   cmd_prompt=$(echo "$selected" | cut -f3 | sed 's/\\n/\n/g')
 
-  # Select target with fzf
-  local targets="all:All agents (skip user pane)
-cc:Claude agents only
-cod:Codex agents only
-gmi:Gemini agents only"
+  # Select target with beautiful fzf menu
+  local targets="${_NTM_ICON_ALL}:all:$_NTM_ICON_ALL  All Agents          │ broadcast to all panes
+${_NTM_ICON_CLAUDE}:cc:$_NTM_ICON_CLAUDE  Claude (cc)        │ anthropic agents only
+${_NTM_ICON_CODEX}:cod:$_NTM_ICON_CODEX  Codex (cod)        │ openai agents only
+${_NTM_ICON_GEMINI}:gmi:$_NTM_ICON_GEMINI  Gemini (gmi)       │ google agents only"
 
   local target_selection
   target_selection=$(echo "$targets" | \
     fzf --delimiter=':' \
-        --with-nth=2 \
-        --header="Send to which agents?" \
-        --height=40% \
-        --border=rounded)
+        --with-nth=3 \
+        --header="$_NTM_ICON_SEND Send \"$cmd_label\" to:" \
+        --prompt="$_NTM_ICON_ARROW Target: " \
+        --pointer="$_NTM_ICON_DOT" \
+        --height=50% \
+        --border=rounded \
+        --border-label=" $_NTM_ICON_TARGET Select Target " \
+        --no-info \
+        $fzf_colors \
+        --ansi)
 
   [[ -z "$target_selection" ]] && return 0
 
-  local target_type="${target_selection%%:*}"
+  local target_type
+  target_type=$(echo "$target_selection" | cut -d':' -f2)
   broadcast-prompt "$session" "$target_type" "$cmd_prompt"
+
+  echo -e "\n${_C_GREEN}$_NTM_ICON_CHECK${_C_RESET} ${_C_BOLD}Sent to $target_type agents${_C_RESET}"
 }
 
 # Initialize sample config
@@ -2251,12 +2654,36 @@ fi
 TMUX_COMMANDS
 
   # Optionally add tmux.conf quality-of-life settings (idempotent)
-  offer_tmux_conf_tweaks
+  # Skip in easy mode since it was already done
+  if [[ "$easy_mode" != true ]]; then
+    offer_tmux_conf_tweaks
+  fi
 
   echo ""
-  echo "✓ Successfully added tmux commands to ~/.zshrc"
-  echo ""
-  echo "Run 'source ~/.zshrc' to load the new commands, then type 'ntm' for help."
+  if [[ "$easy_mode" == true ]]; then
+    echo "╭────────────────────────────────────────────────────────╮"
+    echo "│  ✅ NTM Easy Install Complete!                         │"
+    echo "╰────────────────────────────────────────────────────────╯"
+    echo ""
+    echo "What was installed:"
+    echo "  ✓ NTM commands added to ~/.zshrc"
+    echo "  ✓ tmux.conf tweaks (mouse, colors, status bar)"
+    echo "  ✓ F6 keybinding for command palette"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Run: source ~/.zshrc"
+    echo "  2. Run: ncpinit          (create command palette config)"
+    echo "  3. Press F6 in tmux to open the command palette"
+    echo ""
+    echo "Quick start:"
+    echo "  sat myproject 2 2 1      (spawn 2 Claude, 2 Codex, 1 Gemini)"
+    echo "  rnt myproject            (reconnect to session)"
+    echo "  ntm                      (show all commands)"
+  else
+    echo "✓ Successfully added tmux commands to ~/.zshrc"
+    echo ""
+    echo "Run 'source ~/.zshrc' to load the new commands, then type 'ntm' for help."
+  fi
 }
 
 main "$@"

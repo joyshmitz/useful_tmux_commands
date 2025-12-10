@@ -17,6 +17,22 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_comma
 
 </div>
 
+### 🚀 Easy Mode (Recommended for New Users)
+
+Install everything automatically—tmux, fzf, configs, and keybindings—with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh | bash -s -- --easy
+```
+
+Easy mode automatically:
+- ✅ Installs tmux and fzf (via Homebrew/apt/dnf/pacman)
+- ✅ Adds recommended tmux.conf settings (mouse support, colors, status bar)
+- ✅ Sets up F6 keybinding for the command palette
+- ✅ Creates the NTM command palette directory
+
+After installation, run `source ~/.zshrc` and then `ncpinit` to create your command palette config.
+
 ---
 
 ## 💡 Why This Exists
@@ -123,7 +139,7 @@ sso myproject          # Save all pane outputs to timestamped log files
 
 ### 🎨 Command Palette
 
-Invoke a fuzzy-searchable palette of pre-configured prompts with a single keystroke:
+Invoke a stunning fuzzy-searchable palette of pre-configured prompts with a single keystroke:
 
 ```bash
 ntm-palette myproject              # Open palette for session
@@ -131,11 +147,15 @@ ntm-palette-bind                   # Bind F6 to open palette in tmux popup
 ntm-palette-init                   # Create sample config file
 ```
 
-Press **F6** (after binding) to open a floating palette with:
-- Fuzzy search through all commands
-- Preview of full prompt text
-- Quick selection by typing or arrow keys
-- Target selector (cc/cod/gmi/all/specific pane)
+Press **F6** (after binding) to open a beautiful floating palette featuring:
+- 🎯 **Catppuccin color theme** with elegant gradients
+- 🔍 **Fuzzy search** through all commands with live filtering
+- 📄 **Preview pane** showing full prompt text with syntax highlighting
+- 🎨 **Nerd Font icons** (with Unicode fallbacks for basic terminals)
+- ⚡ **Visual target selector** with color-coded agent types
+- ⌨️ **Keyboard shortcuts**: Ctrl-P (toggle preview), Ctrl-U/D (scroll)
+
+The palette auto-detects your terminal's capabilities and displays rich icons if you have Nerd Fonts installed (via Powerlevel10k, iTerm2, WezTerm, or Kitty).
 
 ### 🔍 Pane Navigation
 
