@@ -12,7 +12,7 @@ Spawn, manage, and coordinate Claude Code, OpenAI Codex, and Google Gemini CLI a
 <div align="center">
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh?$(date +%s)" | bash
 ```
 
 </div>
@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_comma
 Install everything automatically—tmux, fzf, configs, and keybindings—with a single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh | bash -s -- --easy
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh?$(date +%s)" | bash -s -- --easy
 ```
 
 Easy mode automatically:
@@ -177,7 +177,7 @@ znt myproject 3        # Zoom to pane index 3
 ### One-Line Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh?$(date +%s)" | bash
 ```
 
 Then reload your shell:
@@ -224,7 +224,7 @@ source ~/.zshrc
 Or re-run the install script with the uninstall flag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh | bash -s -- --uninstall
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/useful_tmux_commands/main/add_useful_tmux_commands_to_zshrc.sh?$(date +%s)" | bash -s -- --uninstall
 ```
 
 ---
