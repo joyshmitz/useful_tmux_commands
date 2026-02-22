@@ -2,7 +2,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-blue.svg)
 ![Shell](https://img.shields.io/badge/shell-zsh-green.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/License-MIT%2BOpenAI%2FAnthropic%20Rider-blue.svg)
 ![Status](https://img.shields.io/badge/status-stable-brightgreen.svg)
 
 **A powerful tmux session management toolkit for orchestrating multiple AI coding agents in parallel.**
@@ -1816,7 +1816,7 @@ These patterns combine to create robust, maintainable shell scripts that handle 
 
 ## 📜 License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License (with OpenAI/Anthropic Rider). See [LICENSE](LICENSE) for details.
 
 ---
 
